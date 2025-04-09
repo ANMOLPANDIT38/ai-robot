@@ -1,283 +1,341 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import heapq
+from collections import deque
 import random
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    static_folder='static',
+    template_folder='templates'
+)
 CORS(app)
 
-# ------------------- Path Finding Code -------------------
 
 class Node:
     def __init__(self, x, y, g=0, h=0, parent=None):
         self.x = x
         self.y = y
-        self.g = g  # Cost from start to current node
-        self.h = h  # Heuristic (estimated cost from current to goal)
-        self.f = g + h  # Total cost
+        self.g = g
+        self.h = h
+        self.f = g + h
         self.parent = parent
-    
+
     def __lt__(self, other):
-        # If f values are equal, compare h values for tie-breaking
-        return self.f < other.f or (self.f == other.f and self.h < other.h)
-    
+        return (self.f, self.h) < (other.f, other.h)
+
     def __eq__(self, other):
-        return self.x == other.x and self.y == other.y
-    
+        return isinstance(other, Node) and self.x == other.x and self.y == other.y
+
     def __hash__(self):
         return hash((self.x, self.y))
 
-def heuristic(a, b):
-    # Manhattan distance
+
+def heuristic(a: Node, b: Node) -> int:
     return abs(a.x - b.x) + abs(a.y - b.y)
 
-def reconstruct_path(current_node):
+
+def reconstruct_path(node: Node):
     path = []
-    while current_node:
-        path.append({'x': current_node.x, 'y': current_node.y})
-        current_node = current_node.parent
+    while node:
+        path.append({'x': node.x, 'y': node.y})
+        node = node.parent
     return path[::-1]
 
-def a_star(grid, start, goal):
+
+def a_star(grid, start: Node, goal: Node):
     if not grid or not grid[0]:
         return None, []
-    
-    rows = len(grid)
-    cols = len(grid[0])
-    
+
+    rows, cols = len(grid), len(grid[0])
     open_set = []
     heapq.heappush(open_set, start)
-    closed_set = set()
+    closed = set()
     visited = []
-    
+
     while open_set:
         current = heapq.heappop(open_set)
         visited.append({'x': current.x, 'y': current.y})
-        
-        if current.x == goal.x and current.y == goal.y:
+
+        if (current.x, current.y) == (goal.x, goal.y):
             return reconstruct_path(current), visited
-        
-        if (current.x, current.y) in closed_set:
+
+        if (current.x, current.y) in closed:
             continue
-            
-        closed_set.add((current.x, current.y))
-        
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:  # 4-directional movement
+        closed.add((current.x, current.y))
+
+        for dx, dy in [(0,1),(1,0),(0,-1),(-1,0)]:
             x, y = current.x + dx, current.y + dy
-            
             if 0 <= x < cols and 0 <= y < rows and grid[y][x] == 0:
-                neighbor = Node(x, y, current.g + 1, heuristic(Node(x, y), goal), current)
-                
-                if (neighbor.x, neighbor.y) in closed_set:
+                h = heuristic(Node(x,y), goal)
+                neighbor = Node(x, y, current.g + 1, h, current)
+                if (neighbor.x, neighbor.y) in closed:
                     continue
-                
-                # Check if neighbor is in open set
-                found = False
+
+                # if in open_set with worse f, update it
                 for node in open_set:
                     if node == neighbor:
-                        found = True
                         if neighbor.f < node.f:
-                            node.f = neighbor.f
+                            node.g, node.h, node.f, node.parent = neighbor.g, neighbor.h, neighbor.f, neighbor.parent
+                            heapq.heapify(open_set)
+                        break
+                else:
+                    heapq.heappush(open_set, neighbor)
+
+    return None, visited
+
+
+def ao_star(grid, start: Node, goal: Node):
+    if not grid or not grid[0]:
+        return None, []
+
+    rows, cols = len(grid), len(grid[0])
+    open_set = []
+    heapq.heappush(open_set, start)
+    closed = set()
+    visited = []
+
+    while open_set:
+        current = heapq.heappop(open_set)
+        visited.append({'x': current.x, 'y': current.y})
+
+        if (current.x, current.y) == (goal.x, goal.y):
+            return reconstruct_path(current), visited
+
+        if (current.x, current.y) in closed:
+            continue
+        closed.add((current.x, current.y))
+
+        # generate and sort neighbors by heuristic
+        nbrs = []
+        for dx, dy in [(0,1),(1,0),(0,-1),(-1,0)]:
+            x, y = current.x + dx, current.y + dy
+            if 0 <= x < cols and 0 <= y < rows and grid[y][x] == 0:
+                nbrs.append((x,y))
+        nbrs.sort(key=lambda pos: heuristic(Node(*pos), goal))
+
+        for x, y in nbrs:
+            neighbor = Node(x, y, current.g + 1, heuristic(Node(x, y), goal), current)
+            if (neighbor.x, neighbor.y) in closed:
+                continue
+
+            for node in open_set:
+                if node == neighbor:
+                    if neighbor.f < node.f:
+                        node.g, node.h, node.f, node.parent = neighbor.g, neighbor.h, neighbor.f, neighbor.parent
+                        heapq.heapify(open_set)
+                    break
+            else:
+                heapq.heappush(open_set, neighbor)
+
+    return None, visited
+
+
+def dijkstra(grid, start: Node, goal: Node):
+    # A* with zero heuristic
+    if not grid or not grid[0]:
+        return None, []
+
+    rows, cols = len(grid), len(grid[0])
+    open_set = []
+    start.h = 0
+    start.f = 0
+    heapq.heappush(open_set, start)
+    closed = set()
+    visited = []
+
+    while open_set:
+        current = heapq.heappop(open_set)
+        visited.append({'x': current.x, 'y': current.y})
+
+        if (current.x, current.y) == (goal.x, goal.y):
+            return reconstruct_path(current), visited
+
+        if (current.x, current.y) in closed:
+            continue
+        closed.add((current.x, current.y))
+
+        for dx, dy in [(0,1),(1,0),(0,-1),(-1,0)]:
+            x, y = current.x + dx, current.y + dy
+            if 0 <= x < cols and 0 <= y < rows and grid[y][x] == 0:
+                neighbor = Node(x, y, current.g + 1, 0, current)
+                if (neighbor.x, neighbor.y) in closed:
+                    continue
+
+                for node in open_set:
+                    if node == neighbor:
+                        if neighbor.g < node.g:
                             node.g = neighbor.g
+                            node.f = neighbor.g
                             node.parent = neighbor.parent
                             heapq.heapify(open_set)
                         break
-                
-                if not found:
+                else:
                     heapq.heappush(open_set, neighbor)
-    
+
     return None, visited
 
-def ao_star(grid, start, goal):
+
+def bfs(grid, start: Node, goal: Node):
     if not grid or not grid[0]:
         return None, []
-    
-    rows = len(grid)
-    cols = len(grid[0])
-    
-    open_set = []
-    heapq.heappush(open_set, start)
-    closed_set = set()
+
+    rows, cols = len(grid), len(grid[0])
+    queue = deque([start])
+    visited_set = {(start.x, start.y)}
     visited = []
-    
-    while open_set:
-        current = heapq.heappop(open_set)
+
+    while queue:
+        current = queue.popleft()
         visited.append({'x': current.x, 'y': current.y})
-        
-        if current.x == goal.x and current.y == goal.y:
+
+        if (current.x, current.y) == (goal.x, goal.y):
             return reconstruct_path(current), visited
-        
-        if (current.x, current.y) in closed_set:
-            continue
-            
-        closed_set.add((current.x, current.y))
-        
-        neighbors = []
-        for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+
+        for dx, dy in [(0,1),(1,0),(0,-1),(-1,0)]:
             x, y = current.x + dx, current.y + dy
-            
-            if 0 <= x < cols and 0 <= y < rows and grid[y][x] == 0:
-                neighbors.append((x, y))
-        
-        # Sort neighbors based on heuristic to goal
-        neighbors.sort(key=lambda pos: heuristic(Node(pos[0], pos[1]), goal))
-        
-        for x, y in neighbors:
-            neighbor = Node(x, y, current.g + 1, heuristic(Node(x, y), goal), current)
-            
-            if (neighbor.x, neighbor.y) in closed_set:
-                continue
-                
-            found = False
-            for node in open_set:
-                if node == neighbor:
-                    found = True
-                    if neighbor.f < node.f:
-                        node.f = neighbor.f
-                        node.g = neighbor.g
-                        node.parent = neighbor.parent
-                        heapq.heapify(open_set)
-                    break
-            
-            if not found:
-                heapq.heappush(open_set, neighbor)
-    
+            if 0 <= x < cols and 0 <= y < rows and grid[y][x] == 0 and (x,y) not in visited_set:
+                neighbor = Node(x, y, current.g + 1, 0, current)
+                visited_set.add((x, y))
+                queue.append(neighbor)
+
     return None, visited
 
-def find_multiple_paths(grid, start, goal, algorithm, max_alternates=3):
-    # Find primary path
-    if algorithm == 'aostar':
-        primary_path, visited = ao_star(grid, start, goal)
-    else:
-        primary_path, visited = a_star(grid, start, goal)
-    
+
+def dfs(grid, start: Node, goal: Node):
+    if not grid or not grid[0]:
+        return None, []
+
+    rows, cols = len(grid), len(grid[0])
+    stack = [start]
+    visited_set = {(start.x, start.y)}
+    visited = []
+
+    while stack:
+        current = stack.pop()
+        visited.append({'x': current.x, 'y': current.y})
+
+        if (current.x, current.y) == (goal.x, goal.y):
+            return reconstruct_path(current), visited
+
+        for dx, dy in [(0,1),(1,0),(0,-1),(-1,0)]:
+            x, y = current.x + dx, current.y + dy
+            if 0 <= x < cols and 0 <= y < rows and grid[y][x] == 0 and (x,y) not in visited_set:
+                neighbor = Node(x, y, current.g + 1, 0, current)
+                visited_set.add((x, y))
+                stack.append(neighbor)
+
+    return None, visited
+
+
+def find_multiple_paths(grid, start: Node, goal: Node, algorithm: str, max_alternates=3):
+    # pick primary
+    alg = algorithm.lower()
+    funcs = {
+        'astar': a_star,
+        'aostar': ao_star,
+        'dijkstra': dijkstra,
+        'bfs': bfs,
+        'dfs': dfs
+    }
+    fn = funcs.get(alg, a_star)
+    primary_path, visited = fn(grid, start, goal)
     if not primary_path:
         return None, visited
-    
+
     paths = [primary_path]
     grid_copy = [row.copy() for row in grid]
-    
-    # Find alternative paths
-    alternate_paths = []
+    alternates = []
     attempts = 0
-    max_attempts = 20  # Prevent infinite loops
-    
-    while len(alternate_paths) < max_alternates and attempts < max_attempts:
+
+    while len(alternates) < max_alternates and attempts < 20:
         attempts += 1
-        temp_grid = [row.copy() for row in grid_copy]
-        
-        # Block a random node from existing paths (but not start/goal)
-        all_path_nodes = set()
-        for path in paths + alternate_paths:
-            for node in path[1:-1]:  # Exclude start and end
-                all_path_nodes.add((node['x'], node['y']))
-        
-        if not all_path_nodes:
+        temp = [row.copy() for row in grid_copy]
+        all_nodes = {
+            (n['x'], n['y'])
+            for path in paths + alternates
+            for n in path[1:-1]
+        }
+        if not all_nodes:
             break
-            
-        block_x, block_y = random.choice(list(all_path_nodes))
-        temp_grid[block_y][block_x] = 1
-        
-        # Find new path using the same algorithm
-        if algorithm == 'aostar':
-            new_path, _ = ao_star(temp_grid, start, goal)
-        else:
-            new_path, _ = a_star(temp_grid, start, goal)
-        
-        if new_path and not any(p == new_path for p in paths + alternate_paths):
-            alternate_paths.append(new_path)
-    
-    # Sort alternate paths by length and select the shortest alternates
-    alternate_paths.sort(key=lambda p: len(p))
-    paths.extend(alternate_paths[:max_alternates])
-    
+
+        bx, by = random.choice(list(all_nodes))
+        temp[by][bx] = 1  # block one node
+
+        new_path, _ = fn(temp, start, goal)
+        if new_path and not any(p == new_path for p in paths + alternates):
+            alternates.append(new_path)
+
+    alternates.sort(key=len)
+    paths.extend(alternates[:max_alternates])
     return paths, visited
 
-# ------------------- API Endpoint -------------------
-
-@app.route('/api/find-path', methods=['POST'])
-def find_path():
-    try:
-        data = request.get_json()
-        
-        # Validation checks
-        if not data:
-            return jsonify({'success': False, 'message': 'No data received'}), 400
-            
-        if 'grid' not in data or 'start' not in data or 'goal' not in data:
-            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
-            
-        if not isinstance(data['grid'], list) or not all(isinstance(row, list) for row in data['grid']):
-            return jsonify({'success': False, 'message': 'Invalid grid format'}), 400
-            
-        try:
-            start_x = int(data['start']['x'])
-            start_y = int(data['start']['y'])
-            goal_x = int(data['goal']['x'])
-            goal_y = int(data['goal']['y'])
-        except (KeyError, TypeError, ValueError):
-            return jsonify({'success': False, 'message': 'Invalid coordinates format'}), 400
-            
-        # Find path(s)
-        if data.get('findMultiplePaths', False):
-            paths, visited = find_multiple_paths(
-                data['grid'],
-                Node(start_x, start_y),
-                Node(goal_x, goal_y),
-                data.get('algorithm', 'astar'),
-                max_alternates=3
-            )
-            
-            if paths:
-                return jsonify({
-                    'success': True,
-                    'paths': paths,
-                    'visited': visited,
-                    'message': f'Found {len(paths)} paths'
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'message': 'No path exists between start and goal',
-                    'visited': visited
-                })
-        else:
-            # Single path finding
-            if data.get('algorithm') == 'aostar':
-                path, visited = ao_star(data['grid'], 
-                                        Node(start_x, start_y), 
-                                        Node(goal_x, goal_y))
-            else:
-                path, visited = a_star(data['grid'], 
-                                       Node(start_x, start_y), 
-                                       Node(goal_x, goal_y))
-                
-            if path:
-                return jsonify({
-                    'success': True,
-                    'path': path,
-                    'visited': visited
-                })
-            else:
-                return jsonify({
-                    'success': False,
-                    'message': 'No path exists between start and goal',
-                    'visited': visited
-                })
-            
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'Server error: {str(e)}'
-        }), 500
-
-# ------------------- Frontend Route -------------------
 
 @app.route('/')
-def index():
+def home():
     return render_template('index.html')
 
 
-# ------------------- Run the App -------------------
+# serve CSS & JS at root so your <link href="styles.css"> still works
+@app.route('/styles.css')
+def styles():
+    return app.send_static_file('styles.css')
+
+
+@app.route('/script.js')
+def script():
+    return app.send_static_file('script.js')
+
+
+@app.route('/api/find-path', methods=['POST'])
+def find_path():
+    data = request.get_json()
+    if not data:
+        return jsonify(success=False, message='No data received'), 400
+    if 'grid' not in data or 'start' not in data or 'goal' not in data:
+        return jsonify(success=False, message='Missing required fields'), 400
+    if not isinstance(data['grid'], list) or not all(isinstance(r, list) for r in data['grid']):
+        return jsonify(success=False, message='Invalid grid format'), 400
+
+    try:
+        sx, sy = int(data['start']['x']), int(data['start']['y'])
+        gx, gy = int(data['goal']['x']), int(data['goal']['y'])
+    except (KeyError, TypeError, ValueError):
+        return jsonify(success=False, message='Invalid coordinates'), 400
+
+    alg = data.get('algorithm', 'astar').lower()
+    find_multi = bool(data.get('findMultiplePaths', False))
+
+    start = Node(sx, sy)
+    goal = Node(gx, gy)
+
+    try:
+        if find_multi:
+            paths, visited = find_multiple_paths(data['grid'], start, goal, alg)
+            if paths:
+                return jsonify(success=True, paths=paths, visited=visited, message=f'Found {len(paths)} paths')
+            else:
+                return jsonify(success=False, message='No path exists', visited=visited)
+        else:
+            funcs = {
+                'astar': a_star,
+                'aostar': ao_star,
+                'dijkstra': dijkstra,
+                'bfs': bfs,
+                'dfs': dfs
+            }
+            fn = funcs.get(alg)
+            if not fn:
+                return jsonify(success=False, message='Unknown algorithm'), 400
+
+            path, visited = fn(data['grid'], start, goal)
+            if path:
+                return jsonify(success=True, path=path, visited=visited)
+            else:
+                return jsonify(success=False, message='No path exists', visited=visited)
+    except Exception as e:
+        return jsonify(success=False, message=f'Server error: {e}'), 500
+
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
