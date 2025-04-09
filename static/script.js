@@ -369,13 +369,14 @@ async function findPath() {
     
     try {
         const startTime = performance.now();
-        const response = await fetch('http://localhost:5000/api/find-path', {
+        const response = await fetch('/api/find-path', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(gridData)
         });
+
         
         const result = await response.json();
         const endTime = performance.now();
